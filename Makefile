@@ -16,14 +16,12 @@
 MAKEFLAGS+=--warn-undefined-variables
 
 export CARAVEL_ROOT?=$(PWD)/caravel
-export MINI_ROOT?=$(PWD)/caravel_mini
-export UPRJ_ROOT?=$(PWD)
 PRECHECK_ROOT?=${HOME}/mpw_precheck
 export MCW_ROOT?=$(PWD)/mgmt_core_wrapper
 SIM?=RTL
 
 # Install lite version of caravel, (1): caravel-lite, (0): caravel
-CARAVEL_LITE?=1
+CARAVEL_LITE?=0
 
 # PDK switch varient
 export PDK?=sky130A
@@ -39,16 +37,16 @@ ifeq ($(ROOTLESS), 1)
 endif
 export OPENLANE_ROOT?=$(PWD)/dependencies/openlane_src
 export PDK_ROOT?=$(PWD)/dependencies/pdks
+export IPM_ROOT?=$(PWD)/dependencies/ipm
 export DISABLE_LVS?=0
 
 export ROOTLESS
 
 ifeq ($(PDK),sky130A)
 	SKYWATER_COMMIT=f70d8ca46961ff92719d8870a18a076370b85f6c
-	export OPEN_PDKS_COMMIT_LVS?=6d4d11780c40b20ee63cc98e645307a9bf2b2ab8
-	export OPEN_PDKS_COMMIT?=78b7bc32ddb4b6f14f76883c2e2dc5b5de9d1cbc
-	export OPENLANE_TAG?=2023.07.19-1
-	MPW_TAG ?= 2024.09.12-1
+	export OPEN_PDKS_COMMIT?=6d4d11780c40b20ee63cc98e645307a9bf2b2ab8
+	export OPENLANE_TAG?=1.1.1
+	MPW_TAG ?= mpw-9i
 
 ifeq ($(CARAVEL_LITE),1)
 	CARAVEL_NAME := caravel-lite
@@ -64,10 +62,9 @@ endif
 
 ifeq ($(PDK),sky130B)
 	SKYWATER_COMMIT=f70d8ca46961ff92719d8870a18a076370b85f6c
-	export OPEN_PDKS_COMMIT_LVS?=6d4d11780c40b20ee63cc98e645307a9bf2b2ab8
 	export OPEN_PDKS_COMMIT?=78b7bc32ddb4b6f14f76883c2e2dc5b5de9d1cbc
-	export OPENLANE_TAG?=2023.07.19-1
-	MPW_TAG ?= 2024.09.12-1
+	export OPENLANE_TAG?=1.1.1
+	MPW_TAG ?= mpw-9i
 
 ifeq ($(CARAVEL_LITE),1)
 	CARAVEL_NAME := caravel-lite
@@ -107,15 +104,6 @@ install:
 	echo "Installing $(CARAVEL_NAME).."
 	git clone -b $(CARAVEL_TAG) $(CARAVEL_REPO) $(CARAVEL_ROOT) --depth=1
 
-.PHONY: install_mini
-install_mini:
-	if [ -d "$(MINI_ROOT)" ]; then\
-		echo "Deleting exisiting $(MINI_ROOT)" && \
-		rm -rf $(MINI_ROOT) && sleep 2;\
-	fi
-	echo "Installing $(MINI_ROOT).."
-	git clone https://github.com/efabless/caravel_mini.git $(MINI_ROOT) --depth=1
-
 # Install DV setup
 .PHONY: simenv
 simenv:
@@ -127,7 +115,7 @@ simenv-cocotb:
 	docker pull efabless/dv:cocotb
 
 .PHONY: setup
-setup: check_dependencies install install_mini check-env install_mcw openlane pdk-with-volare setup-timing-scripts setup-cocotb precheck
+setup: check_dependencies install check-env install_mcw openlane pdk-with-volare setup-timing-scripts setup-cocotb precheck
 
 # Openlane
 blocks=$(shell cd openlane && find * -maxdepth 0 -type d)
@@ -243,7 +231,17 @@ update_caravel: check-caravel
 uninstall:
 	rm -rf $(CARAVEL_ROOT)
 
+ipm: check_dependencies
+	if [ -d "$(IPM_ROOT)" ]; then\
+		echo "Deleting exisiting $(IPM_ROOT)" && \
+		rm -rf $(IPM_ROOT) && sleep 2;\
+	fi
+	git clone https://github.com/efabless/ipm.git $(IPM_ROOT)
+	cd $(IPM_ROOT)
+	pip install .
 
+ip: ipm
+	ipm install-dep
 # Install Pre-check
 # Default installs to the user home directory, override by "export PRECHECK_ROOT=<precheck-installation-path>"
 .PHONY: precheck
@@ -257,7 +255,7 @@ precheck:
 	@docker pull efabless/mpw_precheck:latest
 
 .PHONY: run-precheck
-run-precheck: check-pdk check-precheck enable-lvs-pdk
+run-precheck: check-pdk check-precheck
 	@if [ "$$DISABLE_LVS" = "1" ]; then\
 		$(eval INPUT_DIRECTORY := $(shell pwd)) \
 		cd $(PRECHECK_ROOT) && \
@@ -284,9 +282,6 @@ run-precheck: check-pdk check-precheck enable-lvs-pdk
 		efabless/mpw_precheck:latest bash -c "cd $(PRECHECK_ROOT) ; python3 mpw_precheck.py --input_directory $(INPUT_DIRECTORY) --pdk_path $(PDK_ROOT)/$(PDK)"; \
 	fi
 
-.PHONY: enable-lvs-pdk
-enable-lvs-pdk:
-	$(UPRJ_ROOT)/venv/bin/volare enable $(OPEN_PDKS_COMMIT_LVS)
 
 BLOCKS = $(shell cd lvs && find * -maxdepth 0 -type d)
 LVS_BLOCKS = $(foreach block, $(BLOCKS), lvs-$(block))
@@ -364,11 +359,11 @@ setup-cocotb: install-caravel-cocotb setup-cocotb-env simenv-cocotb
 
 .PHONY: cocotb-verify-all-rtl
 cocotb-verify-all-rtl: 
-	@(cd $(PROJECT_ROOT)/verilog/dv/cocotb && $(PROJECT_ROOT)/venv-cocotb/bin/caravel_cocotb -tl counter_tests/counter_tests.yaml )
+	@(cd $(PROJECT_ROOT)/verilog/dv/cocotb && $(PROJECT_ROOT)/venv-cocotb/bin/caravel_cocotb -tl user_proj_tests/user_proj_tests.yaml )
 	
 .PHONY: cocotb-verify-all-gl
 cocotb-verify-all-gl:
-	@(cd $(PROJECT_ROOT)/verilog/dv/cocotb && $(PROJECT_ROOT)/venv-cocotb/bin/caravel_cocotb -tl counter_tests/counter_tests_gl.yaml -sim GL)
+	@(cd $(PROJECT_ROOT)/verilog/dv/cocotb && $(PROJECT_ROOT)/venv-cocotb/bin/caravel_cocotb -tl user_proj_tests/user_proj_tests_gl.yaml -verbosity quiet)
 
 $(cocotb-dv-targets-rtl): cocotb-verify-%-rtl: 
 	@(cd $(PROJECT_ROOT)/verilog/dv/cocotb && $(PROJECT_ROOT)/venv-cocotb/bin/caravel_cocotb -t $*  )

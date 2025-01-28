@@ -15,7 +15,8 @@
 
 module user_project_wrapper_mini4 #(
     parameter BITS = 30,
-    parameter COUNT_STEP = 1) (
+    parameter COUNT_STEP = 1
+) (
 `ifdef USE_POWER_PINS
     inout VPWR,  // User area 1 1.8V supply
     inout VGND,  // User area 1 digital ground
@@ -50,29 +51,42 @@ module user_project_wrapper_mini4 #(
     output [2:0] user_irq
 );
 
-`ifdef PnR
-    assign io_out = io_in;
-`else
-    wire valid = wbs_cyc_i && wbs_stb_i;
-    assign io_oeb[35:32] = 6'h3f;
+    // Counter to drive some logic
+    reg [7:0] counter;
+    always @(posedge wb_clk_i or posedge wb_rst_i) begin
+        if (wb_rst_i)
+            counter <= 0;
+        else
+            counter <= counter + COUNT_STEP;
+    end
 
-    counter #(.COUNT_STEP(COUNT_STEP)) count(
+    // Assign the counter value to output for demonstration
+    assign io_out[7:0] = counter;
+
+    // Set output enable for the counter outputs
+    assign io_oeb[7:0] = 8'b0; // Active low, enabled
+
+    // Unused outputs
+    assign io_out[35:8] = 28'b0;
+    assign io_oeb[35:8] = 28'b1; // Disabled
+
+    // SRAM instance
+    SRAM_1024x32_wb_wrapper mprj (
+`ifdef USE_POWER_PINS
+        .VPWR(VPWR),    // User area 1 1.8V power
+        .VGND(VGND),    // User area 1 digital ground
+`endif
         .wb_clk_i(wb_clk_i),
         .wb_rst_i(wb_rst_i),
-        .la_clk_rst(la_data_in[31:30]),
-        .la_clk_rst_oenb(la_oenb[31:30]),
-        .valid(valid),
-        .wstrb(wbs_sel_i & {4{wbs_we_i}}),
-        .wdata(wbs_dat_i[BITS-1:0]),
-        .wbs_adr_i(wbs_adr_i[BITS-1:0]),
-        .la_write(~la_oenb[29:0] & ~{BITS-2{valid}}),
-        .la_input(la_data_in[29:0]),
-        .ready(wbs_ack_o),
-        .rdata(wbs_dat_o[BITS-1:0]),
-        .count(io_out[BITS-1:0]),
-        .io_oeb(io_oeb[BITS-1:0])
-
+        // MGMT SoC Wishbone Slave
+        .wbs_cyc_i(wbs_cyc_i),
+        .wbs_stb_i(wbs_stb_i),
+        .wbs_we_i(wbs_we_i),
+        .wbs_sel_i(wbs_sel_i),
+        .wbs_adr_i(wbs_adr_i),
+        .wbs_dat_i(wbs_dat_i),
+        .wbs_ack_o(wbs_ack_o),
+        .wbs_dat_o(wbs_dat_o)
     );
-`endif
 
 endmodule
